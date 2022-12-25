@@ -87,15 +87,19 @@ class HueAPIv1(object):
     Examples:
         >>> api = HueAPIv1(hueapiuser)
         >>> api.paths.lights
-        "/api/hueapiuser/lights"
-        >>> api.path("lights", 123)
-        "/api/hueapiuser/lights/123"
+        '/api/hueapiuser/lights'
+        >>> api.path("lights")
+        '/api/hueapiuser/lights'
+        >>> api.path("lights", 123, "state")
+        '/api/hueapiuser/lights/123/state'
 
     """
     _PATHS = {
         'hue_cloud': 'www.meethue.com',
-        'api': '/api/{username}',
+        'api': '/api',
         'nupnp': '/api/nupnp',
+
+        'api_user': '/api/{username}',
         'config': '/api/{username}/config',
         'lights': '/api/{username}/lights',
         'sensors': '/api/{username}/sensors',
@@ -751,7 +755,7 @@ class Bridge(object):
 
         connection = httplib.HTTPSConnection(self.api.paths.hue_cloud)
         connection.request('GET', self.api.paths.nupnp)
-        logger.info('Connecting to meethue.com/api/nupnp')
+        logger.info('Connecting to %s', self.api.paths.nupnp)
 
         result = connection.getresponse()
 
@@ -899,7 +903,7 @@ class Bridge(object):
 
     def get_api(self):
         """ Returns the full api dictionary """
-        return self.request('GET', self.api.paths.api)
+        return self.request('GET', self.api.paths.api_user)
 
     def get_light(self, light_id=None, parameter=None):
         """ Gets state by light_id and parameter"""
