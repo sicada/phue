@@ -78,8 +78,20 @@ class PhueRequestTimeout(PhueException):
 
 
 class HueAPIv1(object):
-    """Definitions for the Hue API version 1"""
+    """Definitions for the Hue API version 1 for easier URL / path access.
 
+    Once instantiated every entry in the `_PATHS` dict is available as
+    a parameter of the instance's `self.paths` object. Paths with additional
+    components can be created using the `self.path()` method.
+
+    Examples:
+        >>> api = HueAPIv1(hueapiuser)
+        >>> api.paths.lights
+        "/api/hueapiuser/lights"
+        >>> api.path("lights", 123)
+        "/api/hueapiuser/lights/123"
+
+    """
     _PATHS = {
         'hue_cloud': 'www.meethue.com',
         'api': '/api/{username}',
@@ -94,13 +106,23 @@ class HueAPIv1(object):
 
     def __init__(self, username=None):
         self.username = username
+        # Oneliner to create an arbitrary, empty instance of a new class that
+        # subclasses python's builtin `object` class. All this class does is
+        # hold the API paths as parameters, so they are easier to access.
         self.paths = type("HueAPIv1Path", (object,), {})
+        # Actually convert each entry in the `_PATHS` dict to a parameter of
+        # the new class instance that's located at `self.paths`.
         for key, val in self._PATHS.items():
             if "{username}" in val:
                 val = val.format(username=self.username)
             setattr(self.paths, key, val)
 
     def _path_join(self, *args):
+        """Join multiple components of a URL path together, ensuring that
+        the joined portions don't contain superfluous forward slashes, which
+        would result in the final path containing erroneous '//' characters.
+
+        """
         path = "/"
         for arg in args:
             arg = str(arg)
@@ -114,6 +136,7 @@ class HueAPIv1(object):
         return path
 
     def path(self, basepath, *args):
+        """Returns a path string, with additional path components concatenated."""
         return self._path_join(getattr(self.paths, basepath), *args)
 
 
