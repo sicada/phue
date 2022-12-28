@@ -77,6 +77,73 @@ class PhueRequestTimeout(PhueException):
     pass
 
 
+class HueAPIv1(object):
+    """Definitions for the Hue API version 1 for easier URL / path access.
+
+    Once instantiated every entry in the `_PATHS` dict is available as
+    a parameter of the instance's `self.paths` object. Paths with additional
+    components can be created using the `self.path()` method.
+
+    Examples:
+        >>> api = HueAPIv1(hueapiuser)
+        >>> api.paths.lights
+        '/api/hueapiuser/lights'
+        >>> api.path("lights")
+        '/api/hueapiuser/lights'
+        >>> api.path("lights", 123, "state")
+        '/api/hueapiuser/lights/123/state'
+
+    """
+    _PATHS = {
+        'hue_cloud': 'www.meethue.com',
+        'api': '/api',
+        'nupnp': '/api/nupnp',
+
+        'api_user': '/api/{username}',
+        'config': '/api/{username}/config',
+        'lights': '/api/{username}/lights',
+        'sensors': '/api/{username}/sensors',
+        'groups': '/api/{username}/groups',
+        'scenes': '/api/{username}/scenes',
+        'schedules': '/api/{username}/schedules',
+    }
+
+    def __init__(self, username=None):
+        self.username = username
+        # Oneliner to create an arbitrary, empty instance of a new class that
+        # subclasses python's builtin `object` class. All this class does is
+        # hold the API paths as parameters, so they are easier to access.
+        self.paths = type("HueAPIv1Path", (object,), {})
+        # Actually convert each entry in the `_PATHS` dict to a parameter of
+        # the new class instance that's located at `self.paths`.
+        for key, val in self._PATHS.items():
+            if "{username}" in val:
+                val = val.format(username=self.username)
+            setattr(self.paths, key, val)
+
+    def _path_join(self, *args):
+        """Join multiple components of a URL path together, ensuring that
+        the joined portions don't contain superfluous forward slashes, which
+        would result in the final path containing erroneous '//' characters.
+
+        """
+        path = "/"
+        for arg in args:
+            arg = str(arg)
+            if path[-1] != "/":
+                path = path + "/"
+            if len(arg) == 1 and arg[0] == "/":
+                arg = ""
+            elif len(arg) > 1 and arg[0] == "/":
+                arg = arg[1:]
+            path += arg
+        return path
+
+    def path(self, basepath, *args):
+        """Returns a path string, with additional path components concatenated."""
+        return self._path_join(getattr(self.paths, basepath), *args)
+
+
 class Light(object):
 
     """ Hue Light object
@@ -655,6 +722,8 @@ class Bridge(object):
 
         self.ip = ip
         self.username = username
+        self.api = HueAPIv1(username)
+
         self.lights_by_id = {}
         self.lights_by_name = {}
         self.sensors_by_id = {}
@@ -682,16 +751,14 @@ class Bridge(object):
     @property
     def name(self):
         '''Get or set the name of the bridge [string]'''
-        self._name = self.request(
-            'GET', '/api/' + self.username + '/config')['name']
+        self._name = self.request('GET', self.api.paths.config)['name']
         return self._name
 
     @name.setter
     def name(self, value):
         self._name = value
         data = {'name': self._name}
-        self.request(
-            'PUT', '/api/' + self.username + '/config', data)
+        self.request('PUT', self.api.paths.config, data)
 
     def request(self, mode='GET', address=None, data=None):
         """ Utility function for HTTP GET/PUT requests for the API"""
@@ -724,10 +791,9 @@ class Bridge(object):
 
         """ Get the bridge ip address from the meethue.com nupnp api """
 
-        connection = httplib.HTTPSConnection('www.meethue.com')
-        connection.request('GET', '/api/nupnp')
-
-        logger.info('Connecting to meethue.com/api/nupnp')
+        connection = httplib.HTTPSConnection(self.api.paths.hue_cloud)
+        connection.request('GET', self.api.paths.nupnp)
+        logger.info('Connecting to %s', self.api.paths.nupnp)
 
         result = connection.getresponse()
 
@@ -815,7 +881,7 @@ class Bridge(object):
         The returned collection can be either a list (default), or a dict.
         Set mode='id' for a dict by light ID, or mode='name' for a dict by light name.   """
         if self.lights_by_id == {}:
-            lights = self.request('GET', '/api/' + self.username + '/lights/')
+            lights = self.request('GET', self.api.paths.lights)
             for light in lights:
                 self.lights_by_id[int(light)] = Light(self, int(light))
                 self.lights_by_name[lights[light][
@@ -841,7 +907,7 @@ class Bridge(object):
         The returned collection can be either a list (default), or a dict.
         Set mode='id' for a dict by sensor ID, or mode='name' for a dict by sensor name.   """
         if self.sensors_by_id == {}:
-            sensors = self.request('GET', '/api/' + self.username + '/sensors/')
+            sensors = self.request('GET', self.api.paths.sensors)
             for sensor in sensors:
                 self.sensors_by_id[int(sensor)] = Sensor(self, int(sensor))
                 self.sensors_by_name[sensors[sensor][
@@ -875,7 +941,7 @@ class Bridge(object):
 
     def get_api(self):
         """ Returns the full api dictionary """
-        return self.request('GET', '/api/' + self.username)
+        return self.request('GET', self.api.paths.api_user)
 
     def get_light(self, light_id=None, parameter=None):
         """ Gets state by light_id and parameter"""
@@ -883,9 +949,8 @@ class Bridge(object):
         if is_string(light_id):
             light_id = self.get_light_id_by_name(light_id)
         if light_id is None:
-            return self.request('GET', '/api/' + self.username + '/lights/')
-        state = self.request(
-            'GET', '/api/' + self.username + '/lights/' + str(light_id))
+            return self.request('GET', self.api.paths.lights)
+        state = self.request('GET', self.api.path('lights', light_id))
         if parameter is None:
             return state
         if parameter in ['name', 'type', 'uniqueid', 'swversion']:
@@ -927,15 +992,15 @@ class Bridge(object):
         for light in light_id_array:
             logger.debug(str(data))
             if parameter == 'name':
-                result.append(self.request('PUT', '/api/' + self.username + '/lights/' + str(
-                    light_id), data))
+                _path = self.api.path('lights', light_id)
+                result.append(self.request('PUT', _path, data))
             else:
                 if is_string(light):
                     converted_light = self.get_light_id_by_name(light)
                 else:
                     converted_light = light
-                result.append(self.request('PUT', '/api/' + self.username + '/lights/' + str(
-                    converted_light) + '/state', data))
+                _path = self.api.path('lights', converted_light, 'state')
+                result.append(self.request('PUT', _path, data))
             if 'error' in list(result[-1][0].keys()):
                 logger.warn("ERROR: {0} for light {1}".format(
                     result[-1][0]['error']['description'], light))
@@ -967,7 +1032,7 @@ class Bridge(object):
         if (isinstance(config, dict) and config != {}):
             data["config"] = config
 
-        result = self.request('POST', '/api/' + self.username + '/sensors/', data)
+        result = self.request('POST', self.api.paths.sensors, data)
 
         if ("success" in result[0].keys()):
             new_id = result[0]["success"]["id"]
@@ -986,9 +1051,8 @@ class Bridge(object):
         if is_string(sensor_id):
             sensor_id = self.get_sensor_id_by_name(sensor_id)
         if sensor_id is None:
-            return self.request('GET', '/api/' + self.username + '/sensors/')
-        data = self.request(
-            'GET', '/api/' + self.username + '/sensors/' + str(sensor_id))
+            return self.request('GET', self.api.paths.sensors)
+        data = self.request('GET', self.api.path('sensors', sensor_id))
 
         if isinstance(data, list):
             logger.debug("Unable to read sensor with ID {0}: {1}".format(sensor_id, repr(data)))
@@ -1012,8 +1076,7 @@ class Bridge(object):
 
         result = None
         logger.debug(str(data))
-        result = self.request('PUT', '/api/' + self.username + '/sensors/' + str(
-            sensor_id), data)
+        result = self.request('PUT', self.api.path('sensors', sensor_id), data)
         if 'error' in list(result[0].keys()):
             logger.warn("ERROR: {0} for sensor {1}".format(
                 result[0]['error']['description'], sensor_id))
@@ -1057,8 +1120,8 @@ class Bridge(object):
 
         result = None
         logger.debug(str(data))
-        result = self.request('PUT', '/api/' + self.username + '/sensors/' + str(
-            sensor_id) + "/" + structure, data)
+        _path = self.api.path('sensors', sensor_id, structure)
+        result = self.request('PUT', _path, data)
         if 'error' in list(result[0].keys()):
             logger.warn("ERROR: {0} for sensor {1}".format(
                 result[0]['error']['description'], sensor_id))
@@ -1071,7 +1134,7 @@ class Bridge(object):
             name = self.sensors_by_id[sensor_id].name
             del self.sensors_by_name[name]
             del self.sensors_by_id[sensor_id]
-            return self.request('DELETE', '/api/' + self.username + '/sensors/' + str(sensor_id))
+            return self.request('DELETE', self.api.path('sensors', sensor_id))
         except:
             logger.debug("Unable to delete nonexistent sensor with ID {0}".format(sensor_id))
 
@@ -1096,15 +1159,15 @@ class Bridge(object):
             logger.error('Group name does not exist')
             return
         if group_id is None:
-            return self.request('GET', '/api/' + self.username + '/groups/')
+            return self.request('GET', self.api.paths.groups)
         if parameter is None:
-            return self.request('GET', '/api/' + self.username + '/groups/' + str(group_id))
+            return self.request('GET', self.api.path('groups', group_id))
         elif parameter == 'name' or parameter == 'lights':
-            return self.request('GET', '/api/' + self.username + '/groups/' + str(group_id))[parameter]
+            return self.request('GET', self.api.path('groups', group_id))[parameter]
         elif parameter in ('any_on', 'all_on'):
-            return self.request('GET', '/api/' + self.username + '/groups/' + str(group_id))['state'][parameter]
+            return self.request('GET', self.api.path('groups', group_id))['state'][parameter]
         else:
-            return self.request('GET', '/api/' + self.username + '/groups/' + str(group_id))['action'][parameter]
+            return self.request('GET', self.api.path('groups', group_id))['action'][parameter]
 
     def set_group(self, group_id, parameter, value=None, transitiontime=None):
         """ Change light settings for a group
@@ -1142,9 +1205,11 @@ class Bridge(object):
                 logger.error('Group name does not exist')
                 return
             if parameter == 'name' or parameter == 'lights':
-                result.append(self.request('PUT', '/api/' + self.username + '/groups/' + str(converted_group), data))
+                _path = self.api.path('groups', converted_group)
+                result.append(self.request('PUT', _path, data))
             else:
-                result.append(self.request('PUT', '/api/' + self.username + '/groups/' + str(converted_group) + '/action', data))
+                _path = self.api.path('groups', converted_group, 'action')
+                result.append(self.request('PUT', _path, data))
 
         if 'error' in list(result[-1][0].keys()):
             logger.warn("ERROR: {0} for group {1}".format(
@@ -1165,10 +1230,10 @@ class Bridge(object):
 
         """
         data = {'lights': [str(x) for x in lights], 'name': name}
-        return self.request('POST', '/api/' + self.username + '/groups/', data)
+        return self.request('POST', self.api.paths.groups, data)
 
     def delete_group(self, group_id):
-        return self.request('DELETE', '/api/' + self.username + '/groups/' + str(group_id))
+        return self.request('DELETE', self.api.path('groups', group_id))
 
     # Scenes #####
     @property
@@ -1196,21 +1261,21 @@ class Bridge(object):
             "recycle": True,
             "type": "GroupScene"
         }
-        return self.request('POST', '/api/' + self.username + '/scenes', data)
+        return self.request('POST', self.api.paths.scenes, data)
 
     def modify_scene(self, scene_id, data):
-        return self.request('PUT', '/api/' + self.username + '/scenes/' + scene_id, data)
+        return self.request('PUT', self.api.path('scenes', scene_id), data)
 
     def get_scene(self):
-        return self.request('GET', '/api/' + self.username + '/scenes')
+        return self.request('GET', self.api.paths.scenes)
 
     def activate_scene(self, group_id, scene_id, transition_time=4):
-        return self.request('PUT', '/api/' + self.username + '/groups/' +
-                            str(group_id) + '/action',
-                            {
-                                "scene": scene_id,
-                                "transitiontime": transition_time
-                            })
+        _path = self.api.path('groups', group_id, 'action')
+        data = {
+            "scene": scene_id,
+            "transitiontime": transition_time,
+        }
+        return self.request('PUT', _path, data)
 
     def run_scene(self, group_name, scene_name, transition_time=4):
         """Run a scene by group and scene name.
@@ -1258,16 +1323,16 @@ class Bridge(object):
 
     def delete_scene(self, scene_id):
         try:
-            return self.request('DELETE', '/api/' + self.username + '/scenes/' + str(scene_id))
+            return self.request('DELETE', self.api.path('scenes', scene_id))
         except:
             logger.debug("Unable to delete scene with ID {0}".format(scene_id))
 
     # Schedules #####
     def get_schedule(self, schedule_id=None, parameter=None):
         if schedule_id is None:
-            return self.request('GET', '/api/' + self.username + '/schedules')
+            return self.request('GET', self.api.paths.schedules)
         if parameter is None:
-            return self.request('GET', '/api/' + self.username + '/schedules/' + str(schedule_id))
+            return self.request('GET', self.api.path('schedules', schedule_id))
 
     def create_schedule(self, name, time, light_id, data, description=' '):
         schedule = {
@@ -1277,19 +1342,18 @@ class Bridge(object):
             'command':
             {
                 'method': 'PUT',
-                'address': ('/api/' + self.username +
-                            '/lights/' + str(light_id) + '/state'),
+                'address': self.api.path('lights', light_id, 'state'),
                 'body': data
             }
         }
-        return self.request('POST', '/api/' + self.username + '/schedules', schedule)
+        return self.request('POST', self.api.paths.schedules, schedule)
 
     def set_schedule_attributes(self, schedule_id, attributes):
         """
         :param schedule_id: The ID of the schedule
         :param attributes: Dictionary with attributes and their new values
         """
-        return self.request('PUT', '/api/' + self.username + '/schedules/' + str(schedule_id), data=attributes)
+        return self.request('PUT', self.api.path('schedules', schedule_id), data=attributes)
 
     def create_group_schedule(self, name, time, group_id, data, description=' '):
         schedule = {
@@ -1299,15 +1363,14 @@ class Bridge(object):
             'command':
             {
                 'method': 'PUT',
-                'address': ('/api/' + self.username +
-                            '/groups/' + str(group_id) + '/action'),
+                'address': self.api.path('groups', group_id, 'action'),
                 'body': data
             }
         }
-        return self.request('POST', '/api/' + self.username + '/schedules', schedule)
+        return self.request('POST', self.api.paths.schedules, schedule)
 
     def delete_schedule(self, schedule_id):
-        return self.request('DELETE', '/api/' + self.username + '/schedules/' + str(schedule_id))
+        return self.request('DELETE', self.api.path('schedules', schedule_id))
 
 if __name__ == '__main__':
     import argparse
