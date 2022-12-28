@@ -62,6 +62,7 @@ def decodeString(string):
     else:
         return string.decode('utf-8')
 
+
 class PhueException(Exception):
 
     def __init__(self, id, message):
@@ -868,32 +869,6 @@ class Bridge(object):
                     'Error opening config file, will attempt bridge registration')
                 self.register_app()
 
-    def get_light_id_by_name(self, name):
-        """ Lookup a light id based on string name. Case-sensitive. """
-        lights = self.get_light()
-        for light_id in lights:
-            if decodeString(name) == lights[light_id]['name']:
-                return light_id
-        return False
-
-    def get_light_objects(self, mode='list'):
-        """Returns a collection containing the lights, either by name or id (use 'id' or 'name' as the mode)
-        The returned collection can be either a list (default), or a dict.
-        Set mode='id' for a dict by light ID, or mode='name' for a dict by light name.   """
-        if self.lights_by_id == {}:
-            lights = self.request('GET', self.api.paths.lights)
-            for light in lights:
-                self.lights_by_id[int(light)] = Light(self, int(light))
-                self.lights_by_name[lights[light][
-                    'name']] = self.lights_by_id[int(light)]
-        if mode == 'id':
-            return self.lights_by_id
-        if mode == 'name':
-            return self.lights_by_name
-        if mode == 'list':
-            # return ligts in sorted id order, dicts have no natural order
-            return [self.lights_by_id[id] for id in sorted(self.lights_by_id)]
-
     def get_sensor_id_by_name(self, name):
         """ Lookup a sensor id based on string name. Case-sensitive. """
         sensors = self.get_sensor()
@@ -919,6 +894,11 @@ class Bridge(object):
         if mode == 'list':
             return self.sensors_by_id.values()
 
+
+    def get_api(self):
+        """ Returns the full api dictionary """
+        return self.request('GET', self.api.paths.api_user)
+
     def __getitem__(self, key):
         """ Lights are accessibly by indexing the bridge either with
         an integer index or string name. """
@@ -939,13 +919,51 @@ class Bridge(object):
         """ Access lights as a list """
         return self.get_light_objects()
 
-    def get_api(self):
-        """ Returns the full api dictionary """
-        return self.request('GET', self.api.paths.api_user)
+    def get_light_id_by_name(self, name):
+        """ Lookup a light id based on string name. Case-sensitive. """
+        lights = self.get_light()
+        for light_id in lights:
+            if decodeString(name) == lights[light_id]['name']:
+                return light_id
+        return False
+
+    def get_light_objects(self, mode='list', force=False):
+        """Returns a collection of lights, either from cache or via API request.
+
+        Params:
+            mode (str, optional): Specifies what type of collection is returned:
+                - 'list': Return a list of Light objects (default)
+                - 'id': Return a dict of Light objects indexed by light_id
+                - 'name': Return a dict of Light objects indexed by light name
+            force (bool, optional): When True, forces fetching from the hub via
+                the API. When False, returns objects from cache when possible.
+
+        """
+        if not self.lights_by_id or force is True:
+            lights = self.request('GET', self.api.paths.lights)
+            for light in lights:
+                self.lights_by_id[int(light)] = Light(self, int(light))
+                self.lights_by_name[lights[light]['name']] = self.lights_by_id[int(light)]
+        if mode == 'id':
+            return self.lights_by_id
+        if mode == 'name':
+            return self.lights_by_name
+        if mode == 'list':
+            # return ligts in sorted id order, dicts have no natural order
+            return [self.lights_by_id[id] for id in sorted(self.lights_by_id)]
 
     def get_light(self, light_id=None, parameter=None):
-        """ Gets state by light_id and parameter"""
+        """Gets one or more parameters about a light or all lights.
 
+        Returns:
+            - dict of all lights and their parameters, when `light_id` is None.
+            - dict of one light's parameters when `light_id` is set but `parameter` is None.
+            - str value of a single light parameter when both parameters are set.
+
+        Raises:
+            KeyError if an invalid `parameter` is specified for given light(s).
+
+        """
         if is_string(light_id):
             light_id = self.get_light_id_by_name(light_id)
         if light_id is None:
@@ -1046,8 +1064,15 @@ class Bridge(object):
             return None, result[0]
 
     def get_sensor(self, sensor_id=None, parameter=None):
-        """ Gets state by sensor_id and parameter"""
+        """Gets one or more parameters about a sensor or all sensors.
 
+        Returns:
+            - dict of all sensors and their parameters, when `sensor_id` is None.
+            - dict of one sensor's parameters when `sensor_id` is set but `parameter` is None.
+            - str value of a single sensor parameter when both parameters are set.
+            - None if the sensor API returns a list rather than a dict-like object.
+
+        """
         if is_string(sensor_id):
             sensor_id = self.get_sensor_id_by_name(sensor_id)
         if sensor_id is None:
@@ -1153,6 +1178,15 @@ class Bridge(object):
         return False
 
     def get_group(self, group_id=None, parameter=None):
+        """Gets one or more parameters about a group or all groups.
+
+        Returns:
+            - dict of all groups and their parameters, when `group_id` is None.
+            - dict of one groups's parameters when `group_id` is set but `parameter` is None.
+            - str value of a single group parameter when both parameters are set.
+            - None if the group_id matches no previously known groups.
+
+        """
         if is_string(group_id):
             group_id = self.get_group_id_by_name(group_id)
         if group_id is False:
@@ -1266,8 +1300,21 @@ class Bridge(object):
     def modify_scene(self, scene_id, data):
         return self.request('PUT', self.api.path('scenes', scene_id), data)
 
-    def get_scene(self):
-        return self.request('GET', self.api.paths.scenes)
+    def get_scene(self, scene_id=None, parameter=None):
+        """Gets one or more parameters about a scene or all scenes.
+
+        Returns:
+            - dict of all scenes and their parameters, when `scene_id` is None.
+            - dict of one scene's parameters when `scene_id` is set but `parameter` is None.
+            - str value of a single scene parameter when both parameters are set.
+
+        """
+        if scene_id is None:
+            return self.request('GET', self.api.paths.scenes)
+        if parameter is None:
+            return self.request('GET', self.api.path('scenes', scene_id))
+        else:
+            return self.request('GET', self.api.path('scenes', scene_id))[parameter]
 
     def activate_scene(self, group_id, scene_id, transition_time=4):
         _path = self.api.path('groups', group_id, 'action')
@@ -1329,10 +1376,20 @@ class Bridge(object):
 
     # Schedules #####
     def get_schedule(self, schedule_id=None, parameter=None):
+        """Gets one or more parameters about a schedule or all schedules.
+
+        Returns:
+            - dict of all schedules and their parameters, when `schedule_id` is None.
+            - dict of one schedules's parameters when `schedule_id` is set but `parameter` is None.
+            - str value of a single schedule parameter when both parameters are set.
+
+        """
         if schedule_id is None:
             return self.request('GET', self.api.paths.schedules)
         if parameter is None:
             return self.request('GET', self.api.path('schedules', schedule_id))
+        else:
+            return self.request('GET', self.api.path('schedules', schedule_id))[parameter]
 
     def create_schedule(self, name, time, light_id, data, description=' '):
         schedule = {
