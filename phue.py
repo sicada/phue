@@ -729,6 +729,13 @@ class Bridge(object):
         self.lights_by_name = {}
         self.sensors_by_id = {}
         self.sensors_by_name = {}
+        self.groups_by_id = {}
+        self.groups_by_name = {}
+        self.scenes_by_id = {}
+        self.scenes_by_name = {}
+        self.schedules_by_id = {}
+        self.schedules_by_name = {}
+
         self._name = None
 
         # self.minutes = 600 # these do not seem to be used anywhere?
@@ -877,22 +884,30 @@ class Bridge(object):
                 return sensor_id
         return False
 
-    def get_sensor_objects(self, mode='list'):
-        """Returns a collection containing the sensors, either by name or id (use 'id' or 'name' as the mode)
-        The returned collection can be either a list (default), or a dict.
-        Set mode='id' for a dict by sensor ID, or mode='name' for a dict by sensor name.   """
-        if self.sensors_by_id == {}:
+    def get_sensor_objects(self, mode='list', force=False):
+        """Returns a collection of sensors, either from cache or via API request.
+
+        Params:
+            mode (str, optional): Specifies what type of collection is returned:
+                - 'list': Return a list of Sensor objects (default)
+                - 'id': Return a dict of Sensor objects indexed by id
+                - 'name': Return a dict of Sensor objects indexed by name
+            force (bool, optional): When True, forces fetching from the hub via
+                the API. When False, returns objects from cache when possible.
+
+        """
+        if not self.sensors_by_id or force is True:
             sensors = self.request('GET', self.api.paths.sensors)
             for sensor in sensors:
                 self.sensors_by_id[int(sensor)] = Sensor(self, int(sensor))
-                self.sensors_by_name[sensors[sensor][
-                    'name']] = self.sensors_by_id[int(sensor)]
+                self.sensors_by_name[sensors[sensor]['name']] = (
+                    self.sensors_by_id[int(sensor)])
         if mode == 'id':
             return self.sensors_by_id
         if mode == 'name':
             return self.sensors_by_name
         if mode == 'list':
-            return self.sensors_by_id.values()
+            return [self.sensors_by_id[id] for id in sorted(self.sensors_by_id)]
 
 
     def get_api(self):
@@ -916,7 +931,7 @@ class Bridge(object):
 
     @property
     def lights(self):
-        """ Access lights as a list """
+        """Access lights as a list of Light objects"""
         return self.get_light_objects()
 
     def get_light_id_by_name(self, name):
@@ -933,8 +948,8 @@ class Bridge(object):
         Params:
             mode (str, optional): Specifies what type of collection is returned:
                 - 'list': Return a list of Light objects (default)
-                - 'id': Return a dict of Light objects indexed by light_id
-                - 'name': Return a dict of Light objects indexed by light name
+                - 'id': Return a dict of Light objects indexed by id
+                - 'name': Return a dict of Light objects indexed by name
             force (bool, optional): When True, forces fetching from the hub via
                 the API. When False, returns objects from cache when possible.
 
@@ -943,7 +958,8 @@ class Bridge(object):
             lights = self.request('GET', self.api.paths.lights)
             for light in lights:
                 self.lights_by_id[int(light)] = Light(self, int(light))
-                self.lights_by_name[lights[light]['name']] = self.lights_by_id[int(light)]
+                self.lights_by_name[lights[light]['name']] = (
+                    self.lights_by_id[int(light)])
         if mode == 'id':
             return self.lights_by_id
         if mode == 'name':
@@ -1030,7 +1046,7 @@ class Bridge(object):
 
     @property
     def sensors(self):
-        """ Access sensors as a list """
+        """Access sensors as a list of Sensor objects"""
         return self.get_sensor_objects()
 
     def create_sensor(self, name, modelid, swversion, sensor_type, uniqueid, manufacturername, state={}, config={}, recycle=False):
@@ -1166,8 +1182,8 @@ class Bridge(object):
     # Groups of lights #####
     @property
     def groups(self):
-        """ Access groups as a list """
-        return [Group(self, int(groupid)) for groupid in self.get_group().keys()]
+        """Access groups as a list of Group objects"""
+        return self.get_group_objects()
 
     def get_group_id_by_name(self, name):
         """ Lookup a group id based on string name. Case-sensitive. """
@@ -1176,6 +1192,31 @@ class Bridge(object):
             if decodeString(name) == groups[group_id]['name']:
                 return int(group_id)
         return False
+
+    def get_group_objects(self, mode='list', force=False):
+        """Returns a collection of groups, either from cache or via API request.
+
+        Params:
+            mode (str, optional): Specifies what type of collection is returned:
+                - 'list': Return a list of Group objects (default)
+                - 'id': Return a dict of Group objects indexed by id
+                - 'name': Return a dict of Group objects indexed by name
+            force (bool, optional): When True, forces fetching from the hub via
+                the API. When False, returns objects from cache when possible.
+
+        """
+        if not self.groups_by_id or force is True:
+            groups = self.request('GET', self.api.paths.groups)
+            for group in groups:
+                self.groups_by_id[int(group)] = Group(self, int(group))
+                self.groups_by_name[groups[group]['name']] = (
+                    self.groups_by_id[int(group)])
+        if mode == 'id':
+            return self.groups_by_id
+        if mode == 'name':
+            return self.groups_by_name
+        if mode == 'list':
+            return [self.groups_by_id[id] for id in sorted(self.groups_by_id)]
 
     def get_group(self, group_id=None, parameter=None):
         """Gets one or more parameters about a group or all groups.
@@ -1272,7 +1313,33 @@ class Bridge(object):
     # Scenes #####
     @property
     def scenes(self):
-        return [Scene(k, **v) for k, v in self.get_scene().items()]
+        """Access scenes as a list of Scene objects"""
+        return self.get_scene_objects()
+
+    def get_scene_objects(self, mode='list', force=False):
+        """Returns a collection of scenes, either from cache or via API request.
+
+        Params:
+            mode (str, optional): Specifies what type of collection is returned:
+                - 'list': Return a list of Scene objects (default)
+                - 'id': Return a dict of Scene objects indexed by id
+                - 'name': Return a dict of Scene objects indexed by name
+            force (bool, optional): When True, forces fetching from the hub via
+                the API. When False, returns objects from cache when possible.
+
+        """
+        if not self.scenes_by_id or force is True:
+            scenes = self.request('GET', self.api.paths.scenes)
+            for scene in scenes:
+                self.scenes_by_id[scene] = Scene(scene, **scenes[scene])
+                self.scenes_by_name[scenes[scene]['name']] = (
+                    self.scenes_by_id[scene])
+        if mode == 'id':
+            return self.scenes_by_id
+        if mode == 'name':
+            return self.scenes_by_name
+        if mode == 'list':
+            return [self.scenes_by_id[id] for id in sorted(self.scenes_by_id)]
 
     def create_group_scene(self, name, group):
         """Create a Group Scene
@@ -1375,6 +1442,37 @@ class Bridge(object):
             logger.debug("Unable to delete scene with ID {0}".format(scene_id))
 
     # Schedules #####
+
+    # @property
+    # def scenes(self):
+    #     """Access schedules as a list of Schedule objects"""
+    #     return self.get_schedule_objects()
+
+    # def get_schedule_objects(self, mode='list', force=False):
+    #     """Returns a collection of schedules, either from cache or via API request.
+    #
+    #     Params:
+    #         mode (str, optional): Specifies what type of collection is returned:
+    #             - 'list': Return a list of Schedule objects (default)
+    #             - 'id': Return a dict of Schedule objects indexed by id
+    #             - 'name': Return a dict of Schedule objects indexed by name
+    #         force (bool, optional): When True, forces fetching from the hub via
+    #             the API. When False, returns objects from cache when possible.
+    #
+    #     """
+    #     if not self.schedules_by_id or force is True:
+    #         schedules = self.request('GET', self.api.paths.schedules)
+    #         for schedule in schedules:
+    #             self.schedules_by_id[int(schedule)] = Schedule(int(schedule), **scene.items())
+    #             self.schedules_by_name[schedules[schedule]['name']] = (
+    #                 self.schedules_by_id[int(schedule)])
+    #     if mode == 'id':
+    #         return self.schedules_by_id
+    #     if mode == 'name':
+    #         return self.schedules_by_name
+    #     if mode == 'list':
+    #         return [self.schedules_by_id[id] for id in sorted(self.schedules_by_id)]
+
     def get_schedule(self, schedule_id=None, parameter=None):
         """Gets one or more parameters about a schedule or all schedules.
 
